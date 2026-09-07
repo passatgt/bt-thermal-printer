@@ -8,6 +8,7 @@ import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
+import android.util.Log
 import me.visztpeter.thermalprint.RenderMode
 import java.io.File
 import kotlin.math.ceil
@@ -35,6 +36,8 @@ data class RasterOptions(
  */
 object Rasterizer {
 
+    private const val TAG = "Rasterizer"
+
     private const val PROBE_WIDTH = 900
 
     /** ~1 metre of 58mm paper; a sanity cap so a stray hairline can't produce a mile of output. */
@@ -45,6 +48,9 @@ object Rasterizer {
 
     /** Lighter than this counts as blank paper when looking for margins. */
     private const val PAPER_CUTOFF = 244
+
+    /** Percentage of mid-grey pixels above which AUTO treats a page as a photograph. */
+    private const val PHOTO_MIDTONE_PERCENT = 15
 
     fun renderPdf(file: File, opts: RasterOptions): List<MonoBitmap> {
         val pages = mutableListOf<MonoBitmap>()
@@ -112,6 +118,11 @@ object Rasterizer {
         page.render(bmp, null, m, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
 
         val mono = toMono(bmp, opts)
+        Log.i(
+            TAG,
+            "page ${pageW.toInt()}x${pageH.toInt()}pt crop=[$cropL,$cropT,$cropR,$cropB]" +
+                " scale=$scale -> mono ${mono.width}x${mono.height} (target ${opts.dotWidth})",
+        )
         bmp.recycle()
         return if (mono.isBlank()) null else mono
     }
@@ -138,6 +149,11 @@ object Rasterizer {
         val scaled = smoothScaleToWidth(work, opts.dotWidth)
         if (scaled !== work) work.recycle()
         val mono = toMono(scaled, opts)
+        Log.i(
+            TAG,
+            "image ${source.width}x${source.height} -> scaled ${scaled.width}x${scaled.height}" +
+                " -> mono ${mono.width}x${mono.height} (target ${opts.dotWidth})",
+        )
         scaled.recycle()
         return if (mono.isBlank()) null else mono
     }
@@ -157,7 +173,7 @@ object Rasterizer {
             var rowLeft = -1
             var rowRight = -1
             for (x in 0 until w) {
-                if (greyOverWhite(row[x]) < PAPER_CUTOFF) {
+                if (inkGrey(row[x]) < PAPER_CUTOFF) {
                     if (rowLeft < 0) rowLeft = x
                     rowRight = x
                 }
@@ -174,24 +190,40 @@ object Rasterizer {
     }
 
     /**
-     * Grey level of a pixel composited over white paper, 255 being bare paper.
-     *
-     * Plain perceptual luminance throws saturated colour away: yellow lands at 227,
-     * orange at 173, cyan at 178 — all lighter than any sensible black/white cutoff, so
-     * a coloured heading or logo would come out as blank paper. Pulling each pixel
-     * towards its darkest channel in proportion to how saturated it is fixes that. A
-     * vivid colour becomes ink no matter how bright it is, while near-neutral tints
-     * (pale highlights, light table fills, faint background washes) keep their
-     * luminance and stay white, so the black text sitting on them stays readable.
+     * Perceptual grey of a pixel over white paper — what the eye reads as brightness.
+     * The honest measure of tone, so this is what photographs are dithered from.
      */
-    private fun greyOverWhite(c: Int): Int {
+    private fun toneGrey(c: Int): Int {
+        val a = (c ushr 24) and 0xFF
+        if (a == 0) return 255
+        val r = (c ushr 16) and 0xFF
+        val g = (c ushr 8) and 0xFF
+        val b = c and 0xFF
+        // Weights sum to 256, so the result always lands between minC and maxC.
+        val lum = (r * 77 + g * 151 + b * 28) shr 8
+        return if (a == 255) lum else 255 - ((255 - lum) * a / 255)
+    }
+
+    /**
+     * How much ink a pixel asks for, on the same 255-is-bare-paper scale.
+     *
+     * Tone alone throws saturated colour away: yellow reads as 227, orange 174, cyan
+     * 178 — all lighter than any usable cutoff, so a coloured heading or logo would
+     * print as blank paper. Pulling each pixel towards its darkest channel in
+     * proportion to its saturation fixes that: a vivid colour becomes ink however
+     * bright it is, while near-neutral tints (pale highlights, light table fills)
+     * keep their tone and stay white, so black text on them stays readable.
+     *
+     * This is deliberately *not* used for photographs. A photo is full of saturated
+     * colour, and pulling all of it to black would turn the picture into a silhouette.
+     */
+    private fun inkGrey(c: Int): Int {
         val a = (c ushr 24) and 0xFF
         if (a == 0) return 255
         val r = (c ushr 16) and 0xFF
         val g = (c ushr 8) and 0xFF
         val b = c and 0xFF
 
-        // Weights sum to 256, so lum always lands between minC and maxC.
         val lum = (r * 77 + g * 151 + b * 28) shr 8
         val maxC = max(r, max(g, b))
         val minC = min(r, min(g, b))
@@ -199,6 +231,40 @@ object Rasterizer {
         val grey = lum - (lum - minC) * saturation / 255
 
         return if (a == 255) grey else 255 - ((255 - grey) * a / 255)
+    }
+
+    /**
+     * Guesses whether a page is a photograph rather than text or line art.
+     *
+     * Text spends almost all its pixels at the two extremes — paper white and solid
+     * black — with only a thin antialiased fringe in between. A photograph lives in the
+     * middle of the range. Counting mid-greys separates the two cheaply and, unlike
+     * looking at the file type, still gets a photo embedded in a PDF right.
+     */
+    private fun looksPhotographic(bmp: Bitmap): Boolean {
+        val w = bmp.width
+        val h = bmp.height
+        if (w == 0 || h == 0) return false
+
+        // Sample a grid of at most ~120x120 points; precision beyond that buys nothing.
+        val rowStep = max(1, h / 120)
+        val colStep = max(1, w / 120)
+        val row = IntArray(w)
+        var midtones = 0
+        var sampled = 0
+
+        var y = 0
+        while (y < h) {
+            bmp.getPixels(row, 0, w, 0, y, w, 1)
+            var x = 0
+            while (x < w) {
+                if (toneGrey(row[x]) in 40..214) midtones++
+                sampled++
+                x += colStep
+            }
+            y += rowStep
+        }
+        return sampled > 0 && midtones * 100 / sampled >= PHOTO_MIDTONE_PERCENT
     }
 
     /** Halve repeatedly before the final pass — plain bilinear aliases badly on big downscales. */
@@ -231,11 +297,17 @@ object Rasterizer {
         val out = MonoBitmap(padded, h)
         val row = IntArray(w)
 
-        if (opts.mode == RenderMode.SHARP) {
+        val mode = when (opts.mode) {
+            RenderMode.AUTO ->
+                if (looksPhotographic(bmp)) RenderMode.DITHER else RenderMode.SHARP
+            else -> opts.mode
+        }
+
+        if (mode == RenderMode.SHARP) {
             for (y in 0 until h) {
                 bmp.getPixels(row, 0, w, 0, y, w, 1)
                 for (x in 0 until w) {
-                    if (greyOverWhite(row[x]) < opts.threshold) out.setBlack(x, y)
+                    if (inkGrey(row[x]) < opts.threshold) out.setBlack(x, y)
                 }
             }
             return out
@@ -247,7 +319,7 @@ object Rasterizer {
         for (y in 0 until h) {
             bmp.getPixels(row, 0, w, 0, y, w, 1)
             for (x in 0 until w) {
-                val v = greyOverWhite(row[x]) + cur[x + 1]
+                val v = toneGrey(row[x]) + cur[x + 1]
                 val black = v < opts.threshold
                 if (black) out.setBlack(x, y)
                 val err = v - (if (black) 0 else 255)

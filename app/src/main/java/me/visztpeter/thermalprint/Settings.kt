@@ -2,7 +2,16 @@ package me.visztpeter.thermalprint
 
 import android.content.Context
 
-enum class RenderMode { SHARP, DITHER }
+enum class RenderMode {
+    /** Decide per page from the content itself. */
+    AUTO,
+
+    /** Plain threshold — keeps text strokes solid. */
+    SHARP,
+
+    /** Floyd-Steinberg — fakes the greys the printer doesn't have. */
+    DITHER,
+}
 
 /**
  * All persisted app state. Deliberately tiny: the only thing that really has to be
@@ -33,7 +42,7 @@ class Settings(context: Context) {
 
     var mode: RenderMode
         get() = runCatching { RenderMode.valueOf(sp.getString(K_MODE, null) ?: "") }
-            .getOrDefault(RenderMode.SHARP)
+            .getOrDefault(RenderMode.AUTO)
         set(v) = sp.edit().putString(K_MODE, v.name).apply()
 
     /** -60..+60, shifts the black/white threshold. Higher = darker print. */

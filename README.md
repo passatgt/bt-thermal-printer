@@ -13,10 +13,15 @@ image at exactly the printer's dot width and ships it as ESC/POS raster data.
   2cm margins comes out full-width instead of postage-stamp sized.
 - **Keeps coloured content.** Plain luminance discards saturated colour — yellow
   measures 227 out of 255, brighter than any usable black/white cutoff — so coloured
-  headings and logos would print as blank paper. Pixels are pulled towards their
-  darkest channel in proportion to saturation, so a vivid colour becomes ink at any
-  brightness, while near-neutral tints (pale highlights, light table fills) stay
-  white and the black text on them stays readable.
+  headings and logos would print as blank paper. For text and line art, pixels are
+  pulled towards their darkest channel in proportion to saturation, so a vivid colour
+  becomes ink at any brightness, while near-neutral tints (pale highlights, light
+  table fills) stay white and the black text on them stays readable. Photographs are
+  measured by tone instead, or every saturated area would collapse into a silhouette.
+- **Picks its own rendering.** *Auto* looks at how many mid-greys a page contains:
+  text and line art sit almost entirely at the two extremes, photographs live in the
+  middle. Sharp thresholding for the former, Floyd–Steinberg dithering for the latter,
+  decided per page — so a photo embedded in a PDF gets dithered too.
 - **Renders at native resolution.** Pages are rasterised straight at 203 dpi via a
   transform on `PdfRenderer`, rather than downsampled from a big bitmap, so small
   text stays readable.
@@ -42,7 +47,7 @@ image at exactly the printer's dot width and ships it as ESC/POS raster data.
 | Setting | Default | Notes |
 | --- | --- | --- |
 | Paper width | 58 mm (384 dots) | 80 mm (576 dots) also available |
-| Image style | Sharp | Threshold, best for text. *Dithered* for photos. |
+| Image style | Auto | Per-page guess. Override with *Sharp* or *Dithered*. |
 | Trim margins | on | Off prints the page as laid out |
 | Darkness | +25 | Shifts the black/white cutoff |
 | Feed after print | 4 lines | So the last line clears the tear-off edge |
@@ -71,6 +76,18 @@ export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
+Release builds are minified and signed from a `keystore.properties` in the repo root
+(gitignored) pointing at a keystore kept outside the tree:
+
+```
+storeFile=/path/to/bt-thermal-printer.jks
+storePassword=...
+keyAlias=thermalprint
+keyPassword=...
+```
+
+Without that file the project still builds — the release APK just comes out unsigned.
+
 ## Notes on the printing path
 
 - Raster data goes out in 64-row bands (`GS v 0`), each followed by a short sleep
@@ -78,6 +95,13 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
   writes are paced to the mechanism instead of trusting the socket.
 - `ESC 3 0` (zero line spacing) is sent up front, otherwise many printers insert
   their default feed between bands and the image comes out striped.
+- The print service advertises **48 × 68 mm** as its default page. The ratio is not
+  cosmetic: apps that print images use `PrintHelper`, whose default `SCALE_MODE_FILL`
+  scales a photo to *cover* the page and crops the overflow. The 48 × 297 mm page this
+  originally defaulted to threw away about 78% of a photo's width. 48 × 68 mm is the
+  A-series ratio at this width, so A4 pages map on with no letterboxing and 4:3 photos
+  lose about 6%. Longer pages remain selectable for continuous receipts — and for a
+  landscape photo, set Orientation to landscape in the print dialog.
 - SPP connection is attempted three ways — secure RFCOMM to the SPP service
   record, insecure RFCOMM, then a reflective `createRfcommSocket(1)` — because
   cheap printers often ship a broken or missing service record.

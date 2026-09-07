@@ -139,7 +139,7 @@ private fun PrintScreen(uri: Uri?, onClose: () -> Unit) {
                 else -> {
                     Text(
                         "${pages.size} page${if (pages.size == 1) "" else "s"} · " +
-                            "${settings.dotWidth} dots wide",
+                            "${pages.first().width} × ${pages.sumOf { it.height }} dots",
                         style = MaterialTheme.typography.bodySmall,
                     )
                     pages.forEach { page ->

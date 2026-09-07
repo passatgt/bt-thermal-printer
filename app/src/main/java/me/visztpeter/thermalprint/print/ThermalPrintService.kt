@@ -102,9 +102,16 @@ class ThermalPrintService : PrintService() {
 
             val mm = settings.dotWidth / 8 // 203 dpi == 8 dots per mm
             val caps = PrinterCapabilitiesInfo.Builder(id)
-                .addMediaSize(roll(mm, 297), true)
-                .addMediaSize(roll(mm, 210), false)
+                // 68mm is the A-series ratio for a 48mm width, so an A4 page maps onto
+                // it with no letterboxing at all. It matters more than it looks: apps
+                // that print images use PrintHelper, whose default SCALE_MODE_FILL
+                // scales a photo to *cover* the page and crops the overflow. On the
+                // 48x297 page this used to default to, that threw away ~78% of a
+                // photo's width. Longer pages stay available for continuous receipts.
+                .addMediaSize(roll(mm, 68), true)
                 .addMediaSize(roll(mm, 100), false)
+                .addMediaSize(roll(mm, 210), false)
+                .addMediaSize(roll(mm, 297), false)
                 .addResolution(
                     PrintAttributes.Resolution("thermal", "203 dpi", 203, 203), true
                 )
@@ -126,7 +133,9 @@ class ThermalPrintService : PrintService() {
 
         /** A continuous-roll "page": exact printable width, generous length. */
         private fun roll(widthMm: Int, lengthMm: Int) = PrintAttributes.MediaSize(
-            "roll_${widthMm}x$lengthMm",
+            // v2 ids: the print dialog remembers a media size per printer, and the
+            // old roll_* ids would keep pinning people to the 297mm page.
+            "roll2_${widthMm}x$lengthMm",
             "$widthMm × $lengthMm mm",
             mils(widthMm),
             mils(lengthMm),

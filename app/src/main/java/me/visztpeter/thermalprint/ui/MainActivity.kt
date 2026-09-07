@@ -186,6 +186,12 @@ private fun MainScreen() {
                         "\"Open with\".",
                     style = MaterialTheme.typography.bodyMedium,
                 )
+                Text(
+                    "Printing a photo from another app? Pick the paper size that matches " +
+                        "its shape, and set Orientation to match — the Android print " +
+                        "dialog crops photos to fill the page.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
                 OutlinedButton(onClick = { PrintOps.openPrintSettings(context) }) {
                     Text("Open print settings")
                 }
@@ -206,8 +212,9 @@ private fun MainScreen() {
                 Text("Image style", style = MaterialTheme.typography.labelLarge)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(
-                        RenderMode.SHARP to "Sharp (text)",
-                        RenderMode.DITHER to "Dithered (photos)",
+                        RenderMode.AUTO to "Auto",
+                        RenderMode.SHARP to "Sharp",
+                        RenderMode.DITHER to "Dithered",
                     ).forEach { (m, label) ->
                         FilterChip(
                             selected = mode == m,
@@ -216,6 +223,15 @@ private fun MainScreen() {
                         )
                     }
                 }
+                Text(
+                    when (mode) {
+                        RenderMode.AUTO ->
+                            "Picks per page: sharp for text, dithered for photos."
+                        RenderMode.SHARP -> "Plain threshold. Keeps text strokes solid."
+                        RenderMode.DITHER -> "Floyd-Steinberg. Fakes greys for photos."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                )
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
