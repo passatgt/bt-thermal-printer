@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Thermal Print</string>
+    <string name="print_to_thermal">Print to thermal printer</string>
+    <string name="print_service_name">Thermal Print (58mm)</string>
+</resources>

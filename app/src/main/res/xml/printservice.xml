@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<print-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:settingsActivity="me.visztpeter.thermalprint.ui.MainActivity"
+    android:addPrintersActivity="me.visztpeter.thermalprint.ui.MainActivity" />
