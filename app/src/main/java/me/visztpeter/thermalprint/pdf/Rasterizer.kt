@@ -157,7 +157,7 @@ object Rasterizer {
             var rowLeft = -1
             var rowRight = -1
             for (x in 0 until w) {
-                if (luminanceOverWhite(row[x]) < PAPER_CUTOFF) {
+                if (greyOverWhite(row[x]) < PAPER_CUTOFF) {
                     if (rowLeft < 0) rowLeft = x
                     rowRight = x
                 }
@@ -173,15 +173,32 @@ object Rasterizer {
         return Rect(left, top, right + 1, bottom + 1)
     }
 
-    /** Perceptual grey of a pixel composited over white paper. */
-    private fun luminanceOverWhite(c: Int): Int {
+    /**
+     * Grey level of a pixel composited over white paper, 255 being bare paper.
+     *
+     * Plain perceptual luminance throws saturated colour away: yellow lands at 227,
+     * orange at 173, cyan at 178 — all lighter than any sensible black/white cutoff, so
+     * a coloured heading or logo would come out as blank paper. Pulling each pixel
+     * towards its darkest channel in proportion to how saturated it is fixes that. A
+     * vivid colour becomes ink no matter how bright it is, while near-neutral tints
+     * (pale highlights, light table fills, faint background washes) keep their
+     * luminance and stay white, so the black text sitting on them stays readable.
+     */
+    private fun greyOverWhite(c: Int): Int {
         val a = (c ushr 24) and 0xFF
         if (a == 0) return 255
         val r = (c ushr 16) and 0xFF
         val g = (c ushr 8) and 0xFF
         val b = c and 0xFF
+
+        // Weights sum to 256, so lum always lands between minC and maxC.
         val lum = (r * 77 + g * 151 + b * 28) shr 8
-        return if (a == 255) lum else 255 - ((255 - lum) * a / 255)
+        val maxC = max(r, max(g, b))
+        val minC = min(r, min(g, b))
+        val saturation = if (maxC == 0) 0 else (maxC - minC) * 255 / maxC
+        val grey = lum - (lum - minC) * saturation / 255
+
+        return if (a == 255) grey else 255 - ((255 - grey) * a / 255)
     }
 
     /** Halve repeatedly before the final pass — plain bilinear aliases badly on big downscales. */
@@ -218,7 +235,7 @@ object Rasterizer {
             for (y in 0 until h) {
                 bmp.getPixels(row, 0, w, 0, y, w, 1)
                 for (x in 0 until w) {
-                    if (luminanceOverWhite(row[x]) < opts.threshold) out.setBlack(x, y)
+                    if (greyOverWhite(row[x]) < opts.threshold) out.setBlack(x, y)
                 }
             }
             return out
@@ -230,7 +247,7 @@ object Rasterizer {
         for (y in 0 until h) {
             bmp.getPixels(row, 0, w, 0, y, w, 1)
             for (x in 0 until w) {
-                val v = luminanceOverWhite(row[x]) + cur[x + 1]
+                val v = greyOverWhite(row[x]) + cur[x + 1]
                 val black = v < opts.threshold
                 if (black) out.setBlack(x, y)
                 val err = v - (if (black) 0 else 255)

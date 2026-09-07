@@ -11,6 +11,12 @@ image at exactly the printer's dot width and ships it as ESC/POS raster data.
 - **Trims margins.** Every page is scanned for where the ink actually is, then
   re-rendered so that content fills the full 48mm printable area. An A4 page with
   2cm margins comes out full-width instead of postage-stamp sized.
+- **Keeps coloured content.** Plain luminance discards saturated colour — yellow
+  measures 227 out of 255, brighter than any usable black/white cutoff — so coloured
+  headings and logos would print as blank paper. Pixels are pulled towards their
+  darkest channel in proportion to saturation, so a vivid colour becomes ink at any
+  brightness, while near-neutral tints (pale highlights, light table fills) stay
+  white and the black text on them stays readable.
 - **Renders at native resolution.** Pages are rasterised straight at 203 dpi via a
   transform on `PdfRenderer`, rather than downsampled from a big bitmap, so small
   text stays readable.
